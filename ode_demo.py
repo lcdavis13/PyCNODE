@@ -7,6 +7,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+import torch
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 parser = argparse.ArgumentParser('ODE demo')
@@ -32,6 +38,42 @@ else:
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
 print(device)
 
+
+# # Data processing
+#
+# # Read data
+# inputs = pd.read_csv('waimea_in.csv', index_col=0)
+# targets = pd.read_csv('waimea_out.csv', index_col=0)
+#
+# # Convert to tensors
+# inputs = torch.tensor(inputs.values, dtype=torch.float32)
+# targets = torch.tensor(targets.values, dtype=torch.float32)
+#
+# class CompositionDataset(Dataset):
+#     def __init__(self, inputs, targets):
+#         self.inputs = inputs
+#         self.targets = targets
+#
+#     def __len__(self):
+#         return len(self.inputs)
+#
+#     def __getitem__(self, idx):
+#         return self.inputs[idx], self.targets[idx]
+#
+# # Split indices
+# train_indices, test_indices = train_test_split(list(range(len(inputs))), test_size=0.2, random_state=42)
+#
+# # Create datasets
+# train_dataset = CompositionDataset(inputs[train_indices], targets[train_indices])
+# test_dataset = CompositionDataset(inputs[test_indices], targets[test_indices])
+#
+# batch_size = 32  # You can adjust this based on your specific needs
+#
+# train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+# test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+
+
 true_y0 = torch.tensor([[2., 0.]]).to(device)
 t = torch.linspace(0., 25., args.data_size).to(device)
 true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
@@ -54,66 +96,7 @@ def get_batch():
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 
-def makedirs(dirname):
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
 
-
-if args.viz:
-    makedirs('png')
-    import matplotlib.pyplot as plt
-    import matplotlib
-    matplotlib.use("TkAgg")
-    fig = plt.figure(figsize=(12, 4), facecolor='white')
-    ax_traj = fig.add_subplot(131, frameon=False)
-    ax_phase = fig.add_subplot(132, frameon=False)
-    ax_vecfield = fig.add_subplot(133, frameon=False)
-    plt.show(block=False)
-
-
-def visualize(true_y, pred_y, odefunc, itr):
-
-    if args.viz:
-
-        ax_traj.cla()
-        ax_traj.set_title('Trajectories')
-        ax_traj.set_xlabel('t')
-        ax_traj.set_ylabel('x,y')
-        ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
-        #ax_traj.set_ylim(true_y.cpu().numpy()[:, 0, 0].min(), true_y.cpu().numpy()[:, 0, 0].max())
-        ax_traj.set_ylim(-2, 2)
-        #ax_traj.legend()
-
-        ax_phase.cla()
-        ax_phase.set_title('Phase Portrait')
-        ax_phase.set_xlabel('x')
-        ax_phase.set_ylabel('y')
-        ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_phase.set_xlim(-2, 2)
-        ax_phase.set_ylim(-2, 2)
-
-        ax_vecfield.cla()
-        ax_vecfield.set_title('Learned Vector Field')
-        ax_vecfield.set_xlabel('x')
-        ax_vecfield.set_ylabel('y')
-
-        y, x = np.mgrid[-2:2:21j, -2:2:21j]
-        dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
-        mag = np.sqrt(dydt[:, 0]**2 + dydt[:, 1]**2).reshape(-1, 1)
-        dydt = (dydt / mag)
-        dydt = dydt.reshape(21, 21, 2)
-
-        ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
-        ax_vecfield.set_xlim(-2, 2)
-        ax_vecfield.set_ylim(-2, 2)
-
-        fig.tight_layout()
-        plt.savefig('png/{:03d}'.format(itr))
-        plt.draw()
-        plt.pause(0.001)
 
 
 class ODEFunc(nn.Module):
@@ -156,6 +139,12 @@ class RunningAverageMeter(object):
 
 
 if __name__ == '__main__':
+    
+    viz = None
+    if args.viz:
+        # Lazy import inside the condition
+        from visualizer import Visualizer
+        viz = Visualizer()
 
     ii = 0
 
@@ -184,7 +173,8 @@ if __name__ == '__main__':
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
-                visualize(true_y, pred_y, func, ii)
+                if args.viz:
+                    viz.visualize(true_y, pred_y, func, ii, t, device)
                 ii += 1
 
         end = time.time()
