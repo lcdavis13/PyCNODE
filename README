@@ -1,1 +1,5 @@
 Example conda environment setup: conda create -n PyCNODE torchdiffeq pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia matplotlib pandas numpy scikit-learn
+
+Data from these sources:
+https://github.com/peterjsadowski/Tutorial-Microbiome/tree/main/data/waimea
+https://github.com/michel-mata/cNODE-paper/tree/master/Data/Experimental

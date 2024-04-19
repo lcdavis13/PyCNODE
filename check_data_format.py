@@ -9,7 +9,8 @@ def check_csv_file(file_path, check_invariant=False):
         
         # Check if all row sums are close to 1
         if not df.sum(axis=1).apply(lambda x: round(x, 10)).eq(1).all():
-            print("Not all rows sum to 1.")
+            error = (df.sum(axis=1) - 1).max()
+            print("Not all rows sum to 1. Max error: " + str(error))
             return False
         else:
             print("Row sum check passed.")
@@ -31,10 +32,10 @@ def check_csv_file(file_path, check_invariant=False):
 
 
 # Check waimea_out.csv
-result_out = check_csv_file('data/waimea_out.csv')
+result_out = check_csv_file('data/michel-mata_drosophila_out.csv')
 
 # Check waimea_in.csv with the additional invariant
-result_in = check_csv_file('data/waimea_in.csv', check_invariant=True)
+result_in = check_csv_file('data/michel-mata_drosophila_in.csv', check_invariant=True)
 
 print("\nResults:")
 print(f"'out' file passed all checks: {result_out}")

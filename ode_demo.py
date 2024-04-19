@@ -27,8 +27,11 @@ parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
 args = parser.parse_args()
 
-args.viz = True
+args.viz = False
 args.adjoint = True
+
+
+
 
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
@@ -39,62 +42,79 @@ device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 
 print(device)
 
 
-# # Data processing
+# Data processing
+
+# Read data
+inputs = pd.read_csv('data/michel-mata_drosophila_in.csv', index_col=0)
+targets = pd.read_csv('data/michel-mata_drosophila_out.csv', index_col=0)
+
+# Convert to tensors
+inputs = torch.tensor(inputs.values, dtype=torch.float32)
+targets = torch.tensor(targets.values, dtype=torch.float32)
+
+class CompositionDataset(Dataset):
+    def __init__(self, inputs, targets):
+        self.inputs = inputs
+        self.targets = targets
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, idx):
+        return self.inputs[idx], self.targets[idx]
+
+# Split indices
+train_indices, test_indices = train_test_split(list(range(len(inputs))), test_size=0.2, random_state=42)
+
+# Create datasets
+train_dataset = CompositionDataset(inputs[train_indices], targets[train_indices])
+test_dataset = CompositionDataset(inputs[test_indices], targets[test_indices])
+
+batch_size = 32  # You can adjust this based on your specific needs
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=False)
+
+def get_batch(data_loader):
+    while True:
+        for inputs, targets in data_loader:
+            yield inputs.to(device), targets.to(device)
+            
+train_gen = get_batch(train_loader)
+test_gen = get_batch(test_loader)
+
+# x,y = next(train_gen)
 #
-# # Read data
-# inputs = pd.read_csv('waimea_in.csv', index_col=0)
-# targets = pd.read_csv('waimea_out.csv', index_col=0)
+# print(x.shape)
+# print(y.shape)
+# print(x)
+# print(y)
+
+dimension = inputs.shape[1]
+
+
 #
-# # Convert to tensors
-# inputs = torch.tensor(inputs.values, dtype=torch.float32)
-# targets = torch.tensor(targets.values, dtype=torch.float32)
+# true_y0 = torch.tensor([[2., 0.]]).to(device)
+# t = torch.linspace(0., 25., args.data_size).to(device)
+# true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
 #
-# class CompositionDataset(Dataset):
-#     def __init__(self, inputs, targets):
-#         self.inputs = inputs
-#         self.targets = targets
+# class Lambda(nn.Module):
 #
-#     def __len__(self):
-#         return len(self.inputs)
+#     def forward(self, t, y):
+#         return torch.mm(y**3, true_A)
 #
-#     def __getitem__(self, idx):
-#         return self.inputs[idx], self.targets[idx]
 #
-# # Split indices
-# train_indices, test_indices = train_test_split(list(range(len(inputs))), test_size=0.2, random_state=42)
+# with torch.no_grad():
+#     true_y = odeint(Lambda(), true_y0, t, method='dopri5')
 #
-# # Create datasets
-# train_dataset = CompositionDataset(inputs[train_indices], targets[train_indices])
-# test_dataset = CompositionDataset(inputs[test_indices], targets[test_indices])
 #
-# batch_size = 32  # You can adjust this based on your specific needs
+# def get_batch():
+#     s = torch.from_numpy(np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
+#     batch_y0 = true_y[s]  # (M, D)
+#     batch_t = t[:args.batch_time]  # (T)
+#     batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
+#     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 #
-# train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-# test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-
-
-true_y0 = torch.tensor([[2., 0.]]).to(device)
-t = torch.linspace(0., 25., args.data_size).to(device)
-true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
-
-class Lambda(nn.Module):
-
-    def forward(self, t, y):
-        return torch.mm(y**3, true_A)
-
-
-with torch.no_grad():
-    true_y = odeint(Lambda(), true_y0, t, method='dopri5')
-
-
-def get_batch():
-    s = torch.from_numpy(np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
-    batch_y0 = true_y[s]  # (M, D)
-    batch_t = t[:args.batch_time]  # (T)
-    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
-    return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
-
 
 
 
@@ -105,18 +125,22 @@ class ODEFunc(nn.Module):
         super(ODEFunc, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(2, 50),
-            nn.Tanh(),
-            nn.Linear(50, 2),
+            nn.Linear(dimension, dimension),
+            nn.Tanh(), # To Do: use the actual ODE function instead of adding an arbitrary nonlinearity
+            
+            # nn.Linear(dimension, 50),
+            # nn.Tanh(), # To Do: use the actual ODE function instead of adding an arbitrary nonlinearity
+            # nn.Linear(50, dimension),
         )
 
-        for m in self.net.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0, std=0.1)
-                nn.init.constant_(m.bias, val=0)
+        # #Default initialization should be fine right?
+        # for m in self.net.modules():
+        #     if isinstance(m, nn.Linear):
+        #         nn.init.normal_(m.weight, mean=0, std=0.1)
+        #         nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        return self.net(y**3)
+        return self.net(y)
 
 
 class RunningAverageMeter(object):
@@ -159,7 +183,8 @@ if __name__ == '__main__':
 
     for itr in range(1, args.niters + 1):
         optimizer.zero_grad()
-        batch_y0, batch_t, batch_y = get_batch()
+        batch_y0, batch_y = next(train_gen)
+        batch_t = torch.tensor([0.0, 1.0]).to(device) # To Do: refactor to remove this time-series input, always want to evaluate at t=1
         pred_y = odeint(func, batch_y0, batch_t).to(device)
         loss = torch.mean(torch.abs(pred_y - batch_y))
         loss.backward()
@@ -170,6 +195,8 @@ if __name__ == '__main__':
 
         if itr % args.test_freq == 0:
             with torch.no_grad():
+                true_y0, true_y = next(test_gen)
+                t = torch.tensor([0.0, 1.0]).to(device) # To Do: refactor to remove this time-series input, always want to evaluate at t=1
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))

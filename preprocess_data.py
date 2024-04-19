@@ -5,8 +5,8 @@ import pandas as pd
 import csv
 
 # Load the CSV file
-input_filename = 'data/waimea.csv'  # Update the file name as needed
-df = pd.read_csv(input_filename, header=0, index_col=0)
+input_filename = 'data/michel-mata_drosophila.csv'  # Update the file name as needed
+df = pd.read_csv(input_filename, header=None)
 
 # Create waimea_out DataFrame
 waimea_out = df.copy().transpose()
