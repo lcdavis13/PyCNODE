@@ -133,12 +133,6 @@ class ODEFunc(nn.Module):
             # nn.Linear(50, dimension),
         )
 
-        # #Default initialization should be fine right?
-        # for m in self.net.modules():
-        #     if isinstance(m, nn.Linear):
-        #         nn.init.normal_(m.weight, mean=0, std=0.1)
-        #         nn.init.constant_(m.bias, val=0)
-
     def forward(self, t, y):
         return self.net(y)
 
