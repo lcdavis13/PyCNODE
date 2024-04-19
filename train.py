@@ -20,7 +20,7 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--niters', type=int, default=200000)
 parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -123,18 +123,16 @@ class ODEFunc(nn.Module):
 
     def __init__(self):
         super(ODEFunc, self).__init__()
+        
+        self.f = nn.Linear(dimension, dimension)
 
-        self.net = nn.Sequential(
-            nn.Linear(dimension, dimension),
-            nn.Tanh(), # To Do: use the actual ODE function instead of adding an arbitrary nonlinearity
-            
-            # nn.Linear(dimension, 50),
-            # nn.Tanh(), # To Do: use the actual ODE function instead of adding an arbitrary nonlinearity
-            # nn.Linear(50, dimension),
-        )
-
-    def forward(self, t, y):
-        return self.net(y)
+    def forward(self, t, x): # dx/dt = x * (f(x) - x.f(x))
+        fx = self.f(x)
+        xfx = torch.bmm(x.unsqueeze(1), fx.unsqueeze(2)).squeeze(2) # dot product x*fx, but batched
+        
+        dxdt = x * (fx - xfx)
+        
+        return dxdt
 
 
 class RunningAverageMeter(object):
@@ -147,13 +145,35 @@ class RunningAverageMeter(object):
     def reset(self):
         self.val = None
         self.avg = 0
+        self.min = 1e6
+        self.max = -1e6
 
     def update(self, val):
         if self.val is None:
             self.avg = val
+            self.min = val
+            self.max = val
         else:
             self.avg = self.avg * self.momentum + val * (1 - self.momentum)
+            self.min = min(self.min, val)
+            self.max = max(self.max, val)
         self.val = val
+        
+
+class MinimumMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.min = 1e6
+        self.itr = -1
+
+    def update(self, val, itr):
+        if val < self.min:
+            self.min = val
+            self.itr = itr
 
 
 if __name__ == '__main__':
@@ -174,6 +194,8 @@ if __name__ == '__main__':
     time_meter = RunningAverageMeter(0.97)
     
     loss_meter = RunningAverageMeter(0.97)
+    
+    test_loss_meter = MinimumMeter()
 
     for itr in range(1, args.niters + 1):
         optimizer.zero_grad()
@@ -193,7 +215,8 @@ if __name__ == '__main__':
                 t = torch.tensor([0.0, 1.0]).to(device) # To Do: refactor to remove this time-series input, always want to evaluate at t=1
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
-                print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
+                test_loss_meter.update(loss.item(), itr)
+                print('Iter {:06d} | Train Loss {:.6f} | Test Loss {:.6f} | Min Test Loss {:.6f} @ Iter {:06d}'.format(itr, loss_meter.val, loss.item(), test_loss_meter.min, test_loss_meter.itr))
                 if args.viz:
                     viz.visualize(true_y, pred_y, func, ii, t, device)
                 ii += 1
